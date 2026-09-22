@@ -1,70 +1,402 @@
-Update my existing J.A.R.V.I.S personal AI assistant.
+// ===== 1. API KEY & SMART MODELS =====
 
-IMPORTANT: Do not change the existing futuristic black-and-cyan design, layout, animations, or overall user interface. Preserve the current visual style exactly.
+let API_KEY = localStorage.getItem('jarvis_key');
 
-1. REAL WEB SEARCH (GOOGLE SEARCH GROUNDING)
-- Enable the official Gemini API Google Search tool (google_search).
-- Make real web searches when the user asks for current or online information.
-- Never fabricate search results, sources, website titles, or URLs.
-- Use the grounding metadata returned by the Gemini API to extract genuine search sources.
-- Display real, clickable website titles and URLs in the search results section.
-- Keep normal chat responses working as they currently do.
+if (!API_KEY) {
+  API_KEY = prompt('Enter your Gemini API Key:');
 
-2. SEARCH RESULTS PANEL
-- Create a separate SEARCH RESULTS panel that appears when web search is used.
-- Use the existing futuristic cyan glowing design.
-- Add a cyan border, subtle glow, rounded corners, and mobile-friendly spacing.
-- Display:
-  • Search status
-  • AI-generated answer
-  • Genuine website titles
-  • Clickable source links
-- Open source links safely in a new browser tab.
-- Do not show fake sources or invented URLs.
-- If no verified sources are returned, clearly indicate that sources are unavailable.
+  if (API_KEY) {
+    localStorage.setItem('jarvis_key', API_KEY);
+  }
+}
 
-3. GEMINI API INTEGRATION
-- Update the existing Gemini API request to support Google Search grounding.
-- Correctly parse the API's groundingMetadata.
-- Extract source titles and URLs from groundingChunks.
-- Keep the AI answer separate from the source list.
-- Handle API errors, quota limits, invalid API keys, and unavailable search gracefully.
-- Do not break the existing API key input and localStorage functionality.
+const MODELS = [
+  "gemini-3.5-flash",
+  "gemini-3.1-flash-lite",
+  "gemini-flash-latest"
+];
 
-4. HTML AND SECURITY
-- Never display raw HTML tags as plain text.
-- Use actual DOM elements created with document.createElement() or safe HTML rendering.
-- Use textContent for user-generated text.
-- Validate and safely handle source URLs before making them clickable.
-- Do not introduce XSS vulnerabilities.
 
-5. PRESERVE EXISTING FEATURES
-Do not break any existing functionality:
-- Microphone / voice input
-- Text-to-speech
-- Memory system
-- Camera / image analysis
-- Chat history
-- Clear chat button
-- API key input
-- Existing model fallback system
-- Current J.A.R.V.I.S futuristic UI
+// ===== 2. MEMORY SYSTEM =====
 
-6. RESPONSIVE DESIGN
-- Ensure the new SEARCH RESULTS panel works smoothly on Android mobile screens.
-- Maintain the existing black-and-cyan theme.
-- Avoid horizontal scrolling and layout overflow.
-- Use readable typography and appropriate spacing.
+let MEMORY = JSON.parse(
+  localStorage.getItem('jarvis_memory') || '[]'
+);
 
-7. TESTING
-- Test normal chat without web search.
-- Test real web search with current information.
-- Test clickable source links.
-- Test invalid API keys and API errors.
-- Test microphone, memory, and camera features after the update.
-- Ensure no existing functionality is removed or replaced unnecessarily.
+function saveMemory() {
+  localStorage.setItem(
+    'jarvis_memory',
+    JSON.stringify(MEMORY)
+  );
+}
 
-IMPORTANT:
-Return the complete updated HTML, CSS, and JavaScript code.
-Do not provide a mockup or incomplete implementation.
-Preserve all existing functionality and make the web search feature fully operational.
+const chat = document.getElementById('chat');
+const input = document.getElementById('msg');
+const micBtn = document.getElementById('mic-btn');
+const clearBtn = document.getElementById('clear-btn');
+const camBtn = document.getElementById('cam-btn');
+const imgInput = document.getElementById('img-input');
+
+MEMORY.forEach(m =>
+  add(
+    (m.role === 'user' ? 'YOU: ' : 'J.A.R.V.I.S: ') + m.text,
+    m.role === 'user' ? 'user' : 'ai'
+  )
+);
+
+
+// ===== 3. GEMINI BRAIN (MEMORY INTEGRATED) =====
+
+async function callGemini(p) {
+
+  const contents = MEMORY
+    .slice(-12)
+    .map(m => ({
+      role: m.role,
+      parts: [{ text: m.text }]
+    }));
+
+  contents.push({
+    role: 'user',
+    parts: [{ text: p }]
+  });
+
+  let lastErr;
+
+  for (const m of MODELS) {
+
+    try {
+
+      const res = await fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/" +
+        m +
+        ":generateContent?key=" +
+        API_KEY,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            contents: contents
+          })
+        }
+      );
+
+      const data = await res.json();
+
+      if (data.error) {
+
+        lastErr = new Error(data.error.message);
+
+        if (
+          /high demand|temporary|quota|rate|unavailable|deprecated/i
+            .test(data.error.message)
+        ) {
+          continue;
+        }
+
+        throw lastErr;
+      }
+
+      return data.candidates[0].content.parts[0].text;
+
+    } catch (e) {
+
+      lastErr = e;
+
+    }
+  }
+
+  throw lastErr;
+}
+
+
+async function askGemini(p) {
+
+  add('J.A.R.V.I.S: Thinking...', 'ai');
+
+  try {
+
+    const reply = await callGemini(p);
+
+    MEMORY.push({
+      role: 'user',
+      text: p
+    });
+
+    MEMORY.push({
+      role: 'model',
+      text: reply
+    });
+
+    saveMemory();
+
+    chat.lastChild.innerText =
+      'J.A.R.V.I.S: ' + reply;
+
+    speak(reply);
+
+  } catch (e) {
+
+    chat.lastChild.innerText =
+      'J.A.R.V.I.S: ERROR - ' + e.message;
+
+  }
+}
+
+
+// ===== 4. VISION ENGINE (EYES) =====
+
+if (camBtn && imgInput) {
+
+  camBtn.onclick = () => imgInput.click();
+
+  imgInput.onchange = () => {
+
+    const file = imgInput.files[0];
+
+    if (!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = () => {
+
+      const base64 =
+        reader.result.split(',')[1];
+
+      const q =
+        input.value.trim() ||
+        'What do you see? Describe briefly.';
+
+      add(
+        'YOU: [IMAGE] ' + q,
+        'user'
+      );
+
+      input.value = '';
+
+      askVision(
+        base64,
+        file.type,
+        q
+      );
+    };
+
+    reader.readAsDataURL(file);
+  };
+}
+
+
+async function askVision(base64, mime, q) {
+
+  add(
+    'J.A.R.V.I.S: Analyzing image...',
+    'ai'
+  );
+
+  let lastErr;
+
+  for (const m of MODELS) {
+
+    try {
+
+      const res = await fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/" +
+        m +
+        ":generateContent?key=" +
+        API_KEY,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    text: q
+                  },
+                  {
+                    inline_data: {
+                      mime_type: mime,
+                      data: base64
+                    }
+                  }
+                ]
+              }
+            ]
+          })
+        }
+      );
+
+      const data = await res.json();
+
+      if (data.error) {
+
+        lastErr = new Error(
+          data.error.message
+        );
+
+        if (
+          /high demand|temporary|quota|rate|unavailable|deprecated/i
+            .test(data.error.message)
+        ) {
+          continue;
+        }
+
+        throw lastErr;
+      }
+
+      const reply =
+        data.candidates[0]
+          .content.parts[0].text;
+
+      chat.lastChild.innerText =
+        'J.A.R.V.I.S: ' + reply;
+
+      speak(reply);
+
+      return;
+
+    } catch (e) {
+
+      lastErr = e;
+
+    }
+  }
+
+  chat.lastChild.innerText =
+    'J.A.R.V.I.S: ERROR - ' +
+    lastErr.message;
+}
+
+
+// ===== 5. VOICE & UTILS =====
+
+const SR =
+  window.SpeechRecognition ||
+  window.webkitSpeechRecognition;
+
+if (SR && micBtn) {
+
+  const rec = new SR();
+
+  rec.lang = 'en-US';
+
+  rec.onresult = (e) => {
+
+    const t =
+      e.results[0][0].transcript;
+
+    add(
+      'YOU: ' + t,
+      'user'
+    );
+
+    askGemini(t);
+  };
+
+  micBtn.onclick = () => {
+
+    rec.start();
+
+    micBtn.innerText =
+      'LISTENING...';
+  };
+
+  rec.onend = () => {
+
+    micBtn.innerText = '🎙️';
+
+  };
+}
+
+
+let voices = [];
+
+function loadVoices() {
+
+  voices =
+    speechSynthesis.getVoices();
+}
+
+loadVoices();
+
+speechSynthesis.onvoiceschanged =
+  loadVoices;
+
+
+function speak(t) {
+
+  const u =
+    new SpeechSynthesisUtterance(t);
+
+  u.rate = 1.05;
+  u.pitch = 0.85;
+
+  const v =
+    voices.find(v =>
+      v.lang.startsWith('en')
+    );
+
+  if (v) {
+    u.voice = v;
+  }
+
+  speechSynthesis.speak(u);
+}
+
+
+document.getElementById('send').onclick = () => {
+
+  const t =
+    input.value.trim();
+
+  if (!t) return;
+
+  add(
+    'YOU: ' + t,
+    'user'
+  );
+
+  input.value = '';
+
+  askGemini(t);
+};
+
+
+if (clearBtn) {
+
+  clearBtn.onclick = () => {
+
+    MEMORY = [];
+
+    saveMemory();
+
+    chat.innerHTML = '';
+
+    add(
+      'SYSTEM: Memory cleared.',
+      'ai'
+    );
+  };
+}
+
+
+function add(t, w) {
+
+  const d =
+    document.createElement('div');
+
+  d.className =
+    'msg ' + w;
+
+  d.innerText = t;
+
+  chat.appendChild(d);
+
+  chat.scrollTop =
+    chat.scrollHeight;
+}
