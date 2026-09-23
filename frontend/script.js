@@ -589,4 +589,39 @@ async function handleTools(text) {
     // Send this command to Gemini Brain
     // ==========================================================
     return null;
+}async function processCommand(userText) {
+    try {
+        const toolResult = await handleTools(userText);
+
+        // A tool handled the command
+        if (toolResult !== null) {
+            console.log("JARVIS TOOL:", toolResult);
+
+            if (typeof speak === "function") {
+                speak(toolResult);
+            }
+
+            return toolResult;
+        }
+
+        // No tool matched -> Gemini Brain
+        const geminiReply = await askGemini(userText);
+
+        if (typeof speak === "function") {
+            speak(geminiReply);
+        }
+
+        return geminiReply;
+
+    } catch (error) {
+        console.error("JARVIS command error:", error);
+
+        const message = "Something went wrong, Boss.";
+
+        if (typeof speak === "function") {
+            speak(message);
+        }
+
+        return message;
+    }
 }
